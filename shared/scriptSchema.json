@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["scenes"],
+  "properties": {
+    "scenes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/scene" }
+    }
+  },
+
+  "$defs": {
+    "scene": {
+      "type": "object",
+      "required": ["id", "text"],
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["text", "goto"],
+            "properties": {
+              "text": { "type": "string" },
+              "goto": { "type": "string" },
+              "conditions": { "$ref": "#/$defs/conditions" }
+            }
+          }
+        },
+
+        "dice": {
+          "type": "boolean",
+          "default": false
+        },
+        "roll": {
+          "type": "object",
+          "required": ["count", "type"],
+          "properties": {
+            "count": { "type": "integer", "minimum": 1 },
+            "type": {
+              "type": "string",
+              "pattern": "^d(4\\u007C6\\u007C8\\u007C10\\u007C12\\u007C20\\u007C100)$"
+            }
+          }
+        },
+        "success": { "type": "string" },
+        "fail": { "type": "string" },
+
+        "moving": {
+          "type": "boolean",
+          "default": false
+        },
+        "goto": { "type": "string" },
+
+        "encounter": { "$ref": "#/$defs/encounter" },
+
+        "conditions": { "$ref": "#/$defs/conditions" },
+        "effects": { "$ref": "#/$defs/effects" },
+
+        "inventory": {
+          "type": "object",
+          "properties": {
+            "add": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "remove": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "require": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      },
+
+      "allOf": [
+        {
+          "if": {
+            "properties": { "dice": { "const": true } }
+          },
+          "then": {
+            "required": ["roll", "success", "fail"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "moving": { "const": true } }
+          },
+          "then": {
+            "required": ["goto"]
+          }
+        }
+      ],
+
+      "additionalProperties": false
+    },
+
+    "conditions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "operator", "value"],
+        "properties": {
+          "key": { "type": "string" },
+          "operator": {
+            "type": "string",
+            "enum": ["eq", "neq", "gt", "lt", "gte", "lte", "has"]
+          },
+          "value": {}
+        }
+      }
+    },
+
+    "effects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["set", "modify", "add_item", "remove_item"]
+          },
+          "key": { "type": "string" },
+          "value": {}
+        }
+      }
+    },
+
+    "encounter": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["npc", "combat", "event"]
+        },
+
+        "participants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "role"],
+            "properties": {
+              "id": { "type": "string" },
+              "role": {
+                "type": "string",
+                "enum": ["enemy", "ally", "neutral"]
+              },
+              "hp": { "type": "integer" },
+              "ac": { "type": "integer" }
+            }
+          }
+        },
+
+        "dialogue": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["speaker", "text"],
+            "properties": {
+              "speaker": { "type": "string" },
+              "text": { "type": "string" }
+            }
+          }
+        },
+
+        "loot": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+
+        "outcomes": {
+          "type": "object",
+          "properties": {
+            "win": { "type": "string" },
+            "lose": { "type": "string" },
+            "flee": { "type": "string" }
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

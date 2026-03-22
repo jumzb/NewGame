@@ -1,0 +1,20 @@
+{
+  "name": "newgame",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:client": "tsc -p tsconfig.client.json",
+    "build": "npm run build:server && npm run build:client",
+    "typecheck:client": "tsc -p tsconfig.client.json",
+    "start:server": "node dist/server/server.js"
+  },
+  "dependencies": {
+    "ajv": "^8.18.0",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "outDir": "dist",
+    "rootDir": "./",
+    "composite": true
+  },
+  "include": ["server/**/*.ts", "shared/**/*.ts", "shared/**/*.json"]
+}
