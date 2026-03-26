@@ -1,0 +1,133 @@
+{
+  "scenes": [
+    {
+      "id": "start",
+      "text": "You find yourself on a forest path. A dagger lies on the ground.",
+      "options": [
+        {
+          "text": "Pick up the dagger",
+          "goto": "pickup_dagger"
+        },
+        {
+          "text": "Leave it for now",
+          "goto": "path_continue"
+        }
+      ]
+    },
+    {
+      "id": "pickup_dagger",
+      "text": "You slip the dagger into your belt.",
+      "inventory": {
+        "add": ["dagger"]
+      },
+      "options": [
+        {
+          "text": "Continue down the path",
+          "goto": "wolf"
+        }
+      ]
+    },
+    {
+      "id": "path_continue",
+      "text": "You walk on without touching the dagger.",
+      "options": [
+        {
+          "text": "Follow the path",
+          "goto": "wolf"
+        }
+      ]
+    },
+    {
+      "id": "wolf",
+      "text": "A wild wolf steps out, growling.",
+	  "options": [
+    { "text": "Fight it", "goto": "after_wolf" },
+    { "text": "Run away", "goto": "start" }
+  ],
+      "encounter": {
+        "type": "combat",
+        "participants": [
+          {
+            "id": "wolf_1",
+            "role": "enemy",
+            "hp": 8,
+            "ac": 11
+          }
+        ],
+        "loot": ["fur"],
+        "outcomes": {
+          "win": "after_wolf",
+          "lose": "death",
+          "flee": "start"
+        }
+      }
+    },
+    {
+      "id": "after_wolf",
+      "text": "The wolf is defeated. A small chest sits nearby.",
+      "inventory": {
+        "add": ["fur"]
+      },
+      "options": [
+        {
+          "text": "Open the chest",
+          "goto": "chest"
+        },
+        {
+          "text": "Leave",
+          "goto": "end"
+        }
+      ]
+    },
+    {
+      "id": "chest",
+      "text": "You try to force the chest open.",
+
+      "dice": true,
+      "roll": {
+        "count": 1,
+        "type": "d20"
+      },
+      "success": "treasure",
+      "fail": "fail"
+    },
+    {
+      "id": "treasure",
+      "text": "It cracks open. Inside is a gem.",
+      "inventory": {
+        "add": ["gem"]
+      },
+      "moving": true,
+      "goto": "end"
+    },
+    {
+      "id": "fail",
+      "text": "It won’t budge.",
+      "options": [
+        {
+          "text": "Try again with dagger",
+          "goto": "chest",
+          "conditions": [
+            {
+              "key": "inventory",
+              "operator": "has",
+              "value": "dagger"
+            }
+          ]
+        },
+        {
+          "text": "Give up",
+          "goto": "end"
+        }
+      ]
+    },
+    {
+      "id": "death",
+      "text": "You were slain by the wolf."
+    },
+    {
+      "id": "end",
+      "text": "Your journey ends here."
+    }
+  ]
+}

@@ -18,6 +18,7 @@ export interface SceneOption {
   text: string;
   goto: string;
   conditions?: ScriptCondition[];
+  flags?: FlagAction;
 }
 
 export type ScriptConditionOperator = 'eq' | 'neq' | 'gt' | 'lt' | 'gte' | 'lte' | 'has';
@@ -32,6 +33,12 @@ export interface ScriptEffect {
   type: 'set' | 'modify' | 'add_item' | 'remove_item';
   key?: string;
   value?: unknown;
+}
+
+export interface FlagAction {
+  requires?: string[];
+  sets?: string[];
+  clears?: string[];
 }
 
 export interface ScriptInventory {
@@ -89,16 +96,26 @@ export interface ScriptScene {
   conditions?: ScriptCondition[];
   effects?: ScriptEffect[];
   inventory?: ScriptInventory;
+  flags?: FlagAction;
 }
 
 export interface Script {
   scenes: ScriptScene[];
+  flags?: Record<string, boolean>;
 }
 
 export interface RollState {
   count: number;
   type: string;
   sides: number;
+}
+
+export interface PlayerSceneState {
+  sceneId: string | null;
+  sceneText: string;
+  availableOptions: SceneOption[];
+  diceRollRequired: boolean;
+  rollState: RollState | null;
 }
 
 export interface GameMap {
@@ -116,11 +133,11 @@ export interface GameState {
   turnOrder: string[];
   currentTurnId: string | null;
   nextTurnId: string | null;
-  currentSceneId: string | null;
-  availableOptions: SceneOption[];
-  currentText: string;
-  diceRollRequired: boolean;
-  currentRoll: RollState | null;
+  scriptLoaded: boolean;
+  scriptName: string | null;
+  playerScenes: Record<string, PlayerSceneState>;
+  playerInventory: Record<string, string[]>;
+  globalFlags: Record<string, boolean>;
 }
 
 export const gameState: GameState = {
@@ -136,11 +153,11 @@ export const gameState: GameState = {
   turnOrder: [],
   currentTurnId: null,
   nextTurnId: null,
-  currentSceneId: null,
-  availableOptions: [],
-  currentText: '',
-  diceRollRequired: false,
-  currentRoll: null,
+  scriptLoaded: false,
+  scriptName: null,
+  playerScenes: {},
+  playerInventory: {},
+  globalFlags: {},
 };
 
 export interface ClientJoinMessage {
@@ -233,7 +250,8 @@ export interface ServerScriptMessage {
 export interface ServerSceneMessage {
   type: 'sceneUpdate';
   payload: {
-    sceneId: string;
+    playerId: string;
+    sceneId: string | null;
     text: string;
     options: SceneOption[];
     diceRollRequired: boolean;

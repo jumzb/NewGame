@@ -20,12 +20,77 @@ import {
   ServerScriptMessage,
   ServerSceneMessage,
   ServerErrorMessage,
-  Script,
 } from '../shared/types';
 
 const PORT = Number(process.env.PORT ?? 3000);
+const readRequestBody = (req: http.IncomingMessage) =>
+  new Promise<string>((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk.toString();
+    });
+    req.on('end', () => resolve(body));
+    req.on('error', reject);
+  });
+
+const sendJsonResponse = (
+  res: http.ServerResponse,
+  status: number,
+  payload: Record<string, unknown>
+) => {
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(payload));
+};
 const server = http.createServer(async (req, res) => {
   const url = req.url ?? '/';
+
+  if (req.method === 'POST' && url === '/upload-script') {
+    if (!game.getState().masterId) {
+      sendJsonResponse(res, 400, { error: 'Claim the master seat before uploading a script.' });
+      return;
+    }
+    if (game.getState().gameStarted) {
+      sendJsonResponse(res, 400, { error: 'Game already started; cannot replace the script.' });
+      return;
+    }
+    let payloadText: string;
+    try {
+      payloadText = await readRequestBody(req);
+    } catch (err) {
+      sendJsonResponse(res, 400, { error: 'Unable to read upload payload.' });
+      return;
+    }
+    let payload: Record<string, any>;
+    try {
+      payload = JSON.parse(payloadText);
+    } catch (err) {
+      sendJsonResponse(res, 400, { error: 'Upload body must be valid JSON.' });
+      return;
+    }
+    const { filename, script, playerId } = payload;
+    if (!playerId || playerId !== game.getState().masterId) {
+      sendJsonResponse(res, 403, { error: 'Only the master can upload the script.' });
+      return;
+    }
+    if (typeof filename !== 'string' || !filename.toLowerCase().endsWith('.rpgjson')) {
+      sendJsonResponse(res, 400, { error: 'Script must have a .rpgjson extension.' });
+      return;
+    }
+    if (!script || typeof script !== 'object') {
+      sendJsonResponse(res, 400, { error: 'Script payload must be an object.' });
+      return;
+    }
+    try {
+      game.loadScript(script, filename);
+      broadcastScenes();
+      broadcastState();
+      sendJsonResponse(res, 200, { status: 'Script uploaded successfully.' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Script validation failed.';
+      sendJsonResponse(res, 400, { error: message });
+    }
+    return;
+  }
   try {
     if (url === '/' || url === '/index.html') {
       const html = await readFile(join(process.cwd(), 'client', 'index.html'));
@@ -63,54 +128,6 @@ const server = http.createServer(async (req, res) => {
 
 const wss = new WebSocketServer({ server });
 const game = new Game();
-const storyScript: Script = {
-  scenes: [
-    {
-      id: 'start',
-      text: 'You enter a dimly lit cave.',
-      options: [
-        { text: 'Go left', goto: 'left_path' },
-        { text: 'Go right', goto: 'right_path' },
-      ],
-      dice: false,
-    },
-    {
-      id: 'left_path',
-      text: 'The left path narrows and you see a chasm.',
-      options: [{ text: 'Jump across', goto: 'jump' }, { text: 'Return', goto: 'start' }],
-      dice: true,
-      roll: { count: 1, type: 'd20' },
-      success: 'You leap across safely.',
-      fail: 'You lose your footing and step back.',
-    },
-    {
-      id: 'right_path',
-      text: 'The right path is lined with crystals, there is a fork ahead.',
-      options: [{ text: 'Follow crystals', goto: 'crystals' }],
-      dice: false,
-    },
-    {
-      id: 'jump',
-      text: 'You leap across safely.',
-      options: [],
-      dice: false,
-    },
-    {
-      id: 'crystals',
-      text: 'The crystals sparkle, revealing a hidden passage.',
-      options: [{ text: 'Enter passage', goto: 'passage' }],
-      dice: false,
-    },
-    {
-      id: 'passage',
-      text: 'You find a treasure chest.',
-      options: [],
-      dice: false,
-    },
-  ],
-};
-
-game.loadScript(storyScript);
 
 const broadcast = (message: ServerMessage) => {
   const payload = JSON.stringify(message);
@@ -126,18 +143,30 @@ const broadcastState = () => {
   broadcast(stateMessage);
 };
 
-const broadcastScene = () => {
-  const state = game.getState();
-  const sceneMessage: ServerSceneMessage = {
+const buildSceneMessage = (playerId: string): ServerSceneMessage | null => {
+  const sceneState = game.getPlayerSceneState(playerId);
+  if (!sceneState) return null;
+  return {
     type: 'sceneUpdate',
     payload: {
-      sceneId: state.currentSceneId ?? '',
-      text: state.currentText,
-      options: state.availableOptions,
-      diceRollRequired: state.diceRollRequired,
+      playerId,
+      sceneId: sceneState.sceneId,
+      text: sceneState.sceneText,
+      options: sceneState.availableOptions,
+      diceRollRequired: sceneState.diceRollRequired,
     },
   };
+};
+
+const broadcastSceneForPlayer = (playerId: string) => {
+  const sceneMessage = buildSceneMessage(playerId);
+  if (!sceneMessage) return;
   broadcast(sceneMessage);
+};
+
+const broadcastScenes = () => {
+  const state = game.getState();
+  Object.keys(state.playerScenes).forEach(broadcastSceneForPlayer);
 };
 
 const sendError = (socket: WebSocket, reason: string) => {
@@ -207,11 +236,15 @@ wss.on('connection', (socket) => {
           sendError(socket, 'Only the master may start the game.');
           return;
         }
+        if (!game.getState().scriptLoaded) {
+          sendError(socket, 'Upload a .rpgjson script before starting.');
+          return;
+        }
         if (!game.startGame()) {
           sendError(socket, 'Unable to start (game already started or no players).');
           return;
         }
-        broadcastScene();
+        broadcastScenes();
         broadcastState();
         return;
       }
@@ -272,29 +305,33 @@ wss.on('connection', (socket) => {
           };
           broadcast(scriptMessage);
         }
-        broadcastScene();
+        broadcastSceneForPlayer(playerId);
         broadcastState();
         return;
       }
-      case 'chooseOption': {
-        if (!ensurePlayer()) {
-          sendError(socket, 'Join before choosing an option.');
+        case 'chooseOption': {
+          if (!ensurePlayer()) {
+            sendError(socket, 'Join before choosing an option.');
+            return;
+          }
+          if (!game.getState().gameStarted) {
+            sendError(socket, 'Game has not started yet.');
+            return;
+          }
+          const choose = message as ClientChooseOptionMessage;
+          const result = game.chooseOption(playerId, choose.payload.optionIndex);
+          if (!result) {
+            sendError(socket, 'Invalid scene choice or game not started.');
+            return;
+          }
+          if (result.flagsUpdated) {
+            broadcastScenes();
+          } else {
+            broadcastSceneForPlayer(playerId);
+          }
+          broadcastState();
           return;
         }
-        if (!game.getState().gameStarted) {
-          sendError(socket, 'Game has not started yet.');
-          return;
-        }
-        const choose = message as ClientChooseOptionMessage;
-        const scene = game.chooseOption(playerId, choose.payload.optionIndex);
-        if (!scene) {
-          sendError(socket, 'Invalid scene choice or not your turn.');
-          return;
-        }
-        broadcastScene();
-        broadcastState();
-        return;
-      }
       default:
         sendError(socket, 'Unknown message type');
     }

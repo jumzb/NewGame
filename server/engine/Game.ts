@@ -8,9 +8,12 @@ import {
   Script,
   ScriptScene,
   RollState,
+  PlayerSceneState,
+  FlagAction,
 } from '../../shared/types';
 import { rollDice, DiceResult } from './Dice';
 import Ajv, { JSONSchemaType } from 'ajv';
+import addMetaSchema2020 from 'ajv/dist/refs/json-schema-2020-12/index.js';
 import scriptSchema from '../../shared/scriptSchema.json';
 
 interface ScriptProgress {
@@ -19,7 +22,13 @@ interface ScriptProgress {
   message: string;
 }
 
+interface OptionResult {
+  scene: ScriptScene;
+  flagsUpdated: boolean;
+}
+
 const ajv = new Ajv({ strict: false });
+addMetaSchema2020.call(ajv, false);
 const validateScript = ajv.compile<Script>(
   scriptSchema as unknown as JSONSchemaType<Script>
 );
@@ -39,6 +48,29 @@ export class Game {
     return this.state;
   }
 
+  private checkFlagRequirements(action?: FlagAction): boolean {
+    if (!action?.requires?.length) return true;
+    return action.requires.every((flag) => this.state.globalFlags[flag] !== false);
+  }
+
+  private applyFlagAction(action?: FlagAction): boolean {
+    if (!action) return false;
+    let changed = false;
+    action.sets?.forEach((flag) => {
+      if (this.state.globalFlags[flag] !== true) {
+        this.state.globalFlags[flag] = true;
+        changed = true;
+      }
+    });
+    action.clears?.forEach((flag) => {
+      if (this.state.globalFlags[flag] !== false) {
+        this.state.globalFlags[flag] = false;
+        changed = true;
+      }
+    });
+    return changed;
+  }
+
   hasPlayer(id: string): boolean {
     return Boolean(this.state.players[id]);
   }
@@ -53,9 +85,11 @@ export class Game {
       order: this.nextOrder++,
     };
     this.state.players[id] = player;
+    this.ensurePlayerInventory(id);
     this.state.map.totalPlayers = Object.keys(this.state.players).length;
     this.ensureTurnOrder();
-    this.log(`${displayName} joined the table.`);
+    this.ensurePlayerSceneState(id);
+    this.log(`${displayName} joined the table.`, id);
     return player;
   }
 
@@ -63,9 +97,11 @@ export class Game {
     const player = this.state.players[id];
     if (!player) return;
     delete this.state.players[id];
+    delete this.state.playerScenes[id];
+    delete this.state.playerInventory[id];
     this.state.map.totalPlayers = Object.keys(this.state.players).length;
     this.ensureTurnOrder();
-    this.log(`${player.displayName} disconnected.`);
+    this.log(`${player.displayName} disconnected.`, id);
     if (this.state.masterId === id) {
       this.state.masterId = null;
       this.log(`Master slot freed because ${player.displayName} left.`);
@@ -81,25 +117,23 @@ export class Game {
     if (!player) return;
     player.position = this.calculateNextPosition(player.position, direction);
     this.log(
-      `${player.displayName} moved ${direction} to (${player.position.x}, ${player.position.y}).`
+      `${player.displayName} moved ${direction} to (${player.position.x}, ${player.position.y}).`,
+      id
     );
   }
 
   rollForPlayer(id: string): DiceResult | null {
-    if (
-      !this.state.gameStarted ||
-      this.state.currentTurnId !== id ||
-      !this.state.diceRollRequired ||
-      !this.state.currentRoll
-    ) {
+    if (!this.state.gameStarted || this.state.currentTurnId !== id) {
       return null;
     }
     const player = this.state.players[id];
-    const rollSpec = this.state.currentRoll;
+    const playerScene = this.ensurePlayerSceneState(id);
+    const rollSpec = playerScene?.rollState;
+    if (!playerScene?.diceRollRequired || !rollSpec) return null;
     if (!player || !rollSpec) return null;
     const result = rollDice(rollSpec.sides, rollSpec.count);
     const message = `${player.displayName} rolled ${result.total} (${result.rolls.join(', ')}) on ${result.quantity}d${result.sides}.`;
-    this.log(message);
+    this.log(message, id);
     this.advanceTurn();
     return result;
   }
@@ -110,7 +144,7 @@ export class Game {
     if (!player) return null;
     this.scriptProgress[scriptId] = step;
     const message = `${player.displayName} advanced script ${scriptId} to step ${step}.`;
-    this.log(message);
+    this.log(message, id);
     return { scriptId, step, message };
   }
 
@@ -119,12 +153,13 @@ export class Game {
     if (this.state.masterId && this.state.masterId !== id) return false;
     if (this.state.masterId === id) return true;
     this.state.masterId = id;
-    this.log(`${this.state.players[id].displayName} claimed the master seat.`);
+    this.log(`${this.state.players[id].displayName} claimed the master seat.`, id);
     return true;
   }
 
   startGame(): boolean {
     if (this.state.gameStarted) return false;
+    if (!this.state.scriptLoaded) return false;
     if (!this.state.masterId || !this.state.players[this.state.masterId]) return false;
     if (!this.state.turnOrder.length) return false;
     this.state.gameStarted = true;
@@ -132,12 +167,17 @@ export class Game {
     this.state.currentTurnId = this.state.turnOrder[this.currentTurnIndex];
     this.state.nextTurnId =
       this.state.turnOrder[(this.currentTurnIndex + 1) % this.state.turnOrder.length] ?? null;
+    const initialScene = this.script?.scenes.length ? this.script.scenes[0] : null;
+    Object.keys(this.state.players).forEach((playerId) => {
+      this.state.playerInventory[playerId] = [];
+      this.state.playerScenes[playerId] = this.buildPlayerSceneState(initialScene, playerId, true);
+    });
     const masterName = this.state.players[this.state.masterId].displayName;
-    this.log(`${masterName} started the game.`);
+    this.log(`${masterName} started the game.`, this.state.masterId ?? undefined);
     return true;
   }
 
-  loadScript(script: Script) {
+  loadScript(script: Script, filename?: string) {
     if (!validateScript(script)) {
       const errors = validateScript.errors
         ? validateScript.errors.map((error) => `${error.instancePath || '/'} ${error.message}`).join('; ')
@@ -145,26 +185,37 @@ export class Game {
       throw new Error(`Script validation error: ${errors}`);
     }
     this.script = script;
-    if (!script.scenes.length) {
-      this.setSceneState(null);
-      return;
-    }
-    this.setSceneState(script.scenes[0]);
-    this.log(`Script loaded. Current scene: ${script.scenes[0].id}`);
+    this.state.globalFlags = { ...(script.flags ?? {}) };
+    const initialScene = script.scenes.length ? script.scenes[0] : null;
+    Object.keys(this.state.players).forEach((playerId) => {
+      this.state.playerInventory[playerId] = [];
+      this.state.playerScenes[playerId] = this.buildPlayerSceneState(initialScene, playerId, false);
+    });
+    this.state.scriptLoaded = true;
+    this.state.scriptName = filename ?? null;
+    const sceneId = initialScene?.id;
+    this.log(`Script loaded${sceneId ? `; starting scene ${sceneId}` : ''}`, this.state.masterId ?? undefined);
   }
 
-  chooseOption(playerId: string, optionIndex: number): ScriptScene | null {
-    if (!this.script || !this.state.gameStarted || this.state.currentTurnId !== playerId) return null;
-    const current = this.getCurrentScene();
-    if (!current?.options?.length) return null;
-    const option = current.options[optionIndex];
+  chooseOption(playerId: string, optionIndex: number): OptionResult | null {
+    if (!this.script || !this.state.gameStarted) return null;
+    if (this.state.currentTurnId !== playerId) return null;
+    const playerScene = this.ensurePlayerSceneState(playerId);
+    if (!playerScene?.availableOptions.length) return null;
+    const option = playerScene.availableOptions[optionIndex];
     if (!option) return null;
     const nextScene = this.getSceneById(option.goto);
     if (!nextScene) return null;
-    this.setSceneState(nextScene);
+    const optionFlagsChanged = this.applyFlagAction(option.flags);
+    const sceneFlagsChanged = this.applyFlagAction(nextScene.flags);
+    const newSceneState = this.buildPlayerSceneState(nextScene, playerId, true);
+    this.state.playerScenes[playerId] = newSceneState;
     const playerName = this.state.players[playerId]?.displayName ?? 'Unknown';
-    this.log(`${playerName} chose "${option.text}"`);
-    return nextScene;
+    this.log(`${playerName} chose "${option.text}"`, playerId);
+    if (!newSceneState.diceRollRequired) {
+      this.advanceTurn();
+    }
+    return { scene: nextScene, flagsUpdated: optionFlagsChanged || sceneFlagsChanged };
   }
 
   private ensureTurnOrder() {
@@ -197,7 +248,7 @@ export class Game {
       this.state.turnOrder[(this.currentTurnIndex + 1) % this.state.turnOrder.length] ?? null;
     const player = this.state.players[this.state.currentTurnId];
     if (player) {
-      this.log(`${player.displayName} is now up for the roll.`);
+      this.log(`${player.displayName} is now up for the roll.`, player.id);
     }
   }
 
@@ -205,25 +256,68 @@ export class Game {
     return this.script?.scenes.find((scene) => scene.id === id);
   }
 
-  private getCurrentScene(): ScriptScene | undefined {
-    if (!this.state.currentSceneId) return undefined;
-    return this.getSceneById(this.state.currentSceneId);
+  getPlayerSceneState(playerId: string): PlayerSceneState | null {
+    return this.state.playerScenes[playerId] ?? null;
   }
 
-  private setSceneState(scene: ScriptScene | null) {
-    if (!scene) {
-      this.state.currentSceneId = null;
-      this.state.currentText = '';
-      this.state.availableOptions = [];
-      this.state.diceRollRequired = false;
-      this.state.currentRoll = null;
-      return;
+  private ensurePlayerInventory(playerId: string): string[] {
+    if (!this.state.playerInventory[playerId]) {
+      this.state.playerInventory[playerId] = [];
     }
-    this.state.currentSceneId = scene.id;
-    this.state.currentText = scene.text;
-    this.state.availableOptions = scene.options ?? [];
-    this.state.diceRollRequired = Boolean(scene.dice);
-    this.state.currentRoll = this.buildRollState(scene);
+    return this.state.playerInventory[playerId];
+  }
+
+  private applySceneInventory(playerId: string, scene: ScriptScene | null) {
+    if (!scene?.inventory) return;
+    const inventory = this.ensurePlayerInventory(playerId);
+    scene.inventory.add?.forEach((item) => {
+      if (!inventory.includes(item)) {
+        inventory.push(item);
+      }
+    });
+    scene.inventory.remove?.forEach((item) => {
+      const index = inventory.indexOf(item);
+      if (index >= 0) {
+        inventory.splice(index, 1);
+      }
+    });
+  }
+
+  private ensurePlayerSceneState(playerId: string): PlayerSceneState {
+    if (!this.state.playerScenes[playerId]) {
+      const initialScene = this.script && this.script.scenes.length ? this.script.scenes[0] : null;
+      this.state.playerScenes[playerId] = this.buildPlayerSceneState(initialScene, playerId, this.state.gameStarted);
+    }
+    return this.state.playerScenes[playerId];
+  }
+
+  private buildPlayerSceneState(
+    scene: ScriptScene | null,
+    playerId: string,
+    applyInventory: boolean
+  ): PlayerSceneState {
+    if (!scene) {
+      return {
+        sceneId: null,
+        sceneText: '',
+        availableOptions: [],
+        diceRollRequired: false,
+        rollState: null,
+      };
+    }
+    const availableOptions = (scene.options ?? []).filter((option) =>
+      this.checkFlagRequirements(option.flags)
+    );
+    if (applyInventory) {
+      this.applySceneInventory(playerId, scene);
+    }
+    return {
+      sceneId: scene.id,
+      sceneText: scene.text,
+      availableOptions,
+      diceRollRequired: Boolean(scene.dice),
+      rollState: this.buildRollState(scene),
+    };
   }
 
   private buildRollState(scene: ScriptScene): RollState | null {
@@ -260,7 +354,8 @@ export class Game {
     return { x: position.x + delta.x, y: position.y + delta.y };
   }
 
-  private log(message: string) {
-    this.state.log.push(`[${new Date().toISOString()}] ${message}`);
+  private log(message: string, playerId?: string) {
+    const tag = playerId ? `[player:${playerId}] ` : '';
+    this.state.log.push(`[${new Date().toISOString()}] ${tag}${message}`);
   }
 }

@@ -7,6 +7,14 @@
       "type": "array",
       "items": { "$ref": "#/$defs/scene" }
     }
+    ,
+    "flags": {
+      "type": "object",
+      "patternProperties": {
+        "^.+$": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
   },
 
   "$defs": {
@@ -25,6 +33,7 @@
             "properties": {
               "text": { "type": "string" },
               "goto": { "type": "string" },
+              "flags": { "$ref": "#/$defs/flagAction" },
               "conditions": { "$ref": "#/$defs/conditions" }
             }
           }
@@ -39,10 +48,10 @@
           "required": ["count", "type"],
           "properties": {
             "count": { "type": "integer", "minimum": 1 },
-            "type": {
-              "type": "string",
-              "pattern": "^d(4\\u007C6\\u007C8\\u007C10\\u007C12\\u007C20\\u007C100)$"
-            }
+        "type": {
+          "type": "string",
+          "pattern": "^d(4|6|8|10|12|20|100)$"
+        }
           }
         },
         "success": { "type": "string" },
@@ -75,13 +84,17 @@
               "items": { "type": "string" }
             }
           }
-        }
+        },
+        "flags": { "$ref": "#/$defs/flagAction" }
       },
 
       "allOf": [
         {
           "if": {
-            "properties": { "dice": { "const": true } }
+            "required": ["dice"],
+            "properties": {
+              "dice": { "const": true }
+            }
           },
           "then": {
             "required": ["roll", "success", "fail"]
@@ -89,7 +102,10 @@
         },
         {
           "if": {
-            "properties": { "moving": { "const": true } }
+            "required": ["moving"],
+            "properties": {
+              "moving": { "const": true }
+            }
           },
           "then": {
             "required": ["goto"]
@@ -100,6 +116,24 @@
       "additionalProperties": false
     },
 
+    "flagAction": {
+      "type": "object",
+      "properties": {
+        "requires": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "sets": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "clears": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
     "conditions": {
       "type": "array",
       "items": {

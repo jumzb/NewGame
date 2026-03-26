@@ -1,0 +1,12 @@
+Script comes in form of file
+File uploaded by master before game start - game must not start before script uploaded
+
+To dos: 
+
+- Allow users to roll own die and input result with extra button (ie. roll for me, roll my own")
+
+- Create another app that can generate scripts using the schema in a GUI format
+
+- Look into maps/map generators
+
+
