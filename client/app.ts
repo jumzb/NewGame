@@ -38,7 +38,7 @@ root.innerHTML = `
     <form id="joinForm">
       <label>
         Character Name
-        <input id="nameInput" type="text" placeholder="Bossman" required />
+        <input id="nameInput" type="text" placeholder="Player name" required />
       </label>
       <label>
         Role
@@ -54,11 +54,11 @@ root.innerHTML = `
   </section>
 
   <section class="panel hidden" id="dicePanel">
-    <h2>Dice Ritual</h2>
+    <h2>Questyboy's Quest</h2>
     <p id="characterSummary" class="hint"></p>
     <article class="scene" id="scenePanel">
       <h3>Scene</h3>
-      <p id="sceneText" class="scene-text hint">Waiting for the master to begin the tale.</p>
+      <p id="sceneText" class="scene-text hint">Waiting for the GM to begin the tale.</p>
       <div id="sceneOptions" class="scene-options"></div>
       <p id="sceneDiceHint" class="hint"></p>
     </article>
@@ -304,7 +304,7 @@ const refreshChoiceAvailability = () => {
 const updateScriptUI = (state: GameState) => {
   const isMaster = state.masterId === localId;
   if (!state.masterId) {
-    scriptStatusLine.textContent = 'Waiting for a master to claim the seat.';
+    scriptStatusLine.textContent = 'Waiting for a GM to claim the seat.';
   } else if (!state.scriptLoaded) {
     scriptStatusLine.textContent = isMaster
       ? 'Upload a .rpgjson script to begin the game.'
@@ -328,7 +328,7 @@ const getLocalSceneState = (state: GameState) => {
 const updateSceneFromState = (state: GameState) => {
   if (!state.scriptLoaded) {
     latestScene = null;
-    sceneText.textContent = 'Waiting for the master to upload a script.';
+    sceneText.textContent = 'Waiting for the GM to upload a script.';
     sceneOptions.innerHTML = '';
     sceneDiceHint.textContent = 'A script is required before the adventure can begin.';
     rollBtn.hidden = true;
@@ -336,7 +336,7 @@ const updateSceneFromState = (state: GameState) => {
   }
   if (!state.gameStarted) {
     latestScene = null;
-    sceneText.textContent = 'Game will start once the master hits Start Game.';
+    sceneText.textContent = 'Game will start once the GM hits Start Game.';
     sceneOptions.innerHTML = '';
     sceneDiceHint.textContent = 'Stand by for the first scene.';
     rollBtn.hidden = true;
@@ -347,7 +347,7 @@ const updateSceneFromState = (state: GameState) => {
     latestScene = null;
     sceneText.textContent = 'Waiting for your scene to load.';
     sceneOptions.innerHTML = '';
-    sceneDiceHint.textContent = 'Hold tight while the master spins the tale.';
+    sceneDiceHint.textContent = 'Hold tight while the GM spins the tale.';
     rollBtn.hidden = true;
     return;
   }
@@ -385,15 +385,15 @@ sceneOptions.addEventListener('click', (event) => {
 
 const updateLobbyStatus = (state: GameState) => {
   if (!state.masterId) {
-    statusLine.textContent = 'Connected. Waiting for a master to claim the seat.';
+    statusLine.textContent = 'Connected. Waiting for a GM to claim the seat.';
     return;
   }
   const masterName = getPlayerLabel(state.masterId);
   if (!state.gameStarted) {
     if (state.masterId === localId) {
-      statusLine.textContent = 'You are the master. Start the game when ready.';
+      statusLine.textContent = 'You are the GM. Start the game when ready.';
     } else {
-      statusLine.textContent = `${masterName} is master. Waiting for them to start the game.`;
+      statusLine.textContent = `${masterName} is GM. Waiting for them to start the game.`;
     }
     return;
   }
@@ -413,10 +413,10 @@ const updateMasterControls = (state: GameState) => {
       startGameBtn.disabled = false;
     }
   } else if (!state.masterId) {
-    masterStatus.textContent = 'Claim the master seat to coordinate the table.';
+    masterStatus.textContent = 'Claim the Game Master seat to coordinate the table.';
     startGameBtn.disabled = true;
   } else {
-    masterStatus.textContent = `${getPlayerLabel(state.masterId)} is master.`;
+    masterStatus.textContent = `${getPlayerLabel(state.masterId)} is GM.`;
     startGameBtn.disabled = true;
   }
   if (state.gameStarted) {
@@ -456,7 +456,7 @@ const connect = (name: string) => {
 
   ws.addEventListener('open', () => {
     connected = true;
-    statusLine.textContent = 'Connected. Waiting for a master to claim the seat.';
+    statusLine.textContent = 'Connected. Waiting for a GM to claim the seat.';
     ws?.send(JSON.stringify({ type: 'join', payload: { displayName: name } }));
     showView('dice');
   });
@@ -528,7 +528,7 @@ startGameBtn.disabled = true;
 
 const uploadScriptFile = async () => {
   if (!ws || ws.readyState !== WebSocket.OPEN || !localId) {
-    scriptStatusLine.textContent = 'Connect and claim the master seat before uploading.';
+    scriptStatusLine.textContent = 'Connect and claim the Game Master seat before uploading.';
     return;
   }
   const file = scriptFileInput.files?.[0];
@@ -597,7 +597,7 @@ beginMasterBtn.addEventListener('click', () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type: 'claimMaster' }));
   beginMasterBtn.disabled = true;
-  masterStatus.textContent = 'Requesting master control...';
+  masterStatus.textContent = 'Requesting GM control...';
 });
 
 startGameBtn.addEventListener('click', () => {
