@@ -48,6 +48,28 @@ export class Game {
     return this.state;
   }
 
+  private setPlayerConnected(id: string, connected: boolean) {
+    const player = this.state.players[id];
+    if (!player) return;
+    if (player.connected === connected) return;
+    player.connected = connected;
+    if (connected) {
+      player.connectedAt = new Date().toISOString();
+    }
+    const verb = connected ? 'reconnected' : 'disconnected';
+    this.log(`${player.displayName} ${verb}.`, id);
+  }
+
+  reconnectPlayer(id: string): boolean {
+    if (!this.state.players[id]) return false;
+    this.setPlayerConnected(id, true);
+    return true;
+  }
+
+  disconnectPlayer(id: string) {
+    this.setPlayerConnected(id, false);
+  }
+
   private checkFlagRequirements(action?: FlagAction): boolean {
     if (!action?.requires?.length) return true;
     return action.requires.every((flag) => this.state.globalFlags[flag] !== false);
@@ -82,6 +104,7 @@ export class Game {
       position: { x: 0, y: 0 },
       hp: 10,
       connectedAt: new Date().toISOString(),
+      connected: true,
       order: this.nextOrder++,
     };
     this.state.players[id] = player;

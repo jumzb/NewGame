@@ -13,6 +13,7 @@ import {
   ClientRollDiceMessage,
   ClientScriptActionMessage,
   ClientChooseOptionMessage,
+  ScenePayload,
   ServerMessage,
   ServerStateMessage,
   ServerIdMessage,
@@ -143,19 +144,23 @@ const broadcastState = () => {
   broadcast(stateMessage);
 };
 
-const buildSceneMessage = (playerId: string): ServerSceneMessage | null => {
+const buildScenePayload = (playerId: string): ScenePayload | null => {
   const sceneState = game.getPlayerSceneState(playerId);
   if (!sceneState) return null;
   return {
-    type: 'sceneUpdate',
-    payload: {
-      playerId,
-      sceneId: sceneState.sceneId,
-      text: sceneState.sceneText,
-      options: sceneState.availableOptions,
-      diceRollRequired: sceneState.diceRollRequired,
-    },
+    playerId,
+    sceneId: sceneState.sceneId,
+    text: sceneState.sceneText,
+    options: sceneState.availableOptions,
+    diceRollRequired: sceneState.diceRollRequired,
+    rollState: sceneState.rollState,
   };
+};
+
+const buildSceneMessage = (playerId: string): ServerSceneMessage | null => {
+  const payload = buildScenePayload(playerId);
+  if (!payload) return null;
+  return { type: 'sceneUpdate', payload };
 };
 
 const broadcastSceneForPlayer = (playerId: string) => {
@@ -177,16 +182,25 @@ const sendError = (socket: WebSocket, reason: string) => {
 };
 
 wss.on('connection', (socket) => {
-  const playerId = randomUUID();
-  socket.send(JSON.stringify({ type: 'id', payload: { playerId } } as ServerIdMessage));
-
+  let boundPlayerId: string | null = null;
   let joined = false;
 
-  const ensurePlayer = () => {
-    if (joined && !game.hasPlayer(playerId)) {
-      joined = false;
+  const sendAssignedId = (id: string) => {
+    boundPlayerId = id;
+    const idMessage: ServerIdMessage = { type: 'id', payload: { playerId: id } };
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(idMessage));
     }
-    return joined;
+  };
+
+  const ensurePlayer = () => {
+    if (!joined || !boundPlayerId) return false;
+    if (!game.hasPlayer(boundPlayerId)) {
+      joined = false;
+      boundPlayerId = null;
+      return false;
+    }
+    return true;
   };
 
   socket.on('message', (raw) => {
@@ -209,7 +223,27 @@ wss.on('connection', (socket) => {
           sendError(socket, 'Game already started; new joins are closed.');
           return;
         }
-        game.addPlayer(playerId, join.payload.displayName);
+        const requestedId = join.payload.playerId;
+        if (requestedId && game.hasPlayer(requestedId)) {
+          const existing = game.getState().players[requestedId];
+          if (existing?.connected) {
+            sendError(socket, 'Player ID already connected.');
+            return;
+          }
+          const reconnected = game.reconnectPlayer(requestedId);
+          if (!reconnected) {
+            sendError(socket, 'Unable to reconnect; player slot is unavailable.');
+            return;
+          }
+          sendAssignedId(requestedId);
+          joined = true;
+          broadcastState();
+          broadcastSceneForPlayer(requestedId);
+          return;
+        }
+        const newPlayerId = randomUUID();
+        game.addPlayer(newPlayerId, join.payload.displayName);
+        sendAssignedId(newPlayerId);
         joined = true;
         broadcastState();
         return;
@@ -219,6 +253,7 @@ wss.on('connection', (socket) => {
           sendError(socket, 'Join before claiming the master seat.');
           return;
         }
+        const playerId = boundPlayerId ?? '';
         const success = game.claimMaster(playerId);
         if (!success) {
           sendError(socket, 'There is already a master.');
@@ -232,6 +267,7 @@ wss.on('connection', (socket) => {
           sendError(socket, 'Join before starting the game.');
           return;
         }
+        const playerId = boundPlayerId ?? '';
         if (game.getState().masterId !== playerId) {
           sendError(socket, 'Only the master may start the game.');
           return;
@@ -254,7 +290,7 @@ wss.on('connection', (socket) => {
           return;
         }
         const move = message as ClientMoveMessage;
-        game.movePlayer(playerId, move.payload.direction);
+        game.movePlayer(boundPlayerId ?? '', move.payload.direction);
         broadcastState();
         return;
       }
@@ -263,6 +299,7 @@ wss.on('connection', (socket) => {
           sendError(socket, 'You must join before rolling dice.');
           return;
         }
+        const playerId = boundPlayerId ?? '';
         const diceResult = game.rollForPlayer(playerId);
         if (!diceResult) {
           sendError(socket, 'Not your turn or game not started.');
@@ -288,6 +325,7 @@ wss.on('connection', (socket) => {
           return;
         }
         const script = message as ClientScriptActionMessage;
+        const playerId = boundPlayerId ?? '';
         const progress = game.runScriptAction(
           playerId,
           script.payload.scriptId,
@@ -309,39 +347,41 @@ wss.on('connection', (socket) => {
         broadcastState();
         return;
       }
-        case 'chooseOption': {
-          if (!ensurePlayer()) {
-            sendError(socket, 'Join before choosing an option.');
-            return;
-          }
-          if (!game.getState().gameStarted) {
-            sendError(socket, 'Game has not started yet.');
-            return;
-          }
-          const choose = message as ClientChooseOptionMessage;
-          const result = game.chooseOption(playerId, choose.payload.optionIndex);
-          if (!result) {
-            sendError(socket, 'Invalid scene choice or game not started.');
-            return;
-          }
-          if (result.flagsUpdated) {
-            broadcastScenes();
-          } else {
-            broadcastSceneForPlayer(playerId);
-          }
-          broadcastState();
+      case 'chooseOption': {
+        if (!ensurePlayer()) {
+          sendError(socket, 'Join before choosing an option.');
           return;
         }
+        if (!game.getState().gameStarted) {
+          sendError(socket, 'Game has not started yet.');
+          return;
+        }
+        const choose = message as ClientChooseOptionMessage;
+        const playerId = boundPlayerId ?? '';
+        const result = game.chooseOption(playerId, choose.payload.optionIndex);
+        if (!result) {
+          sendError(socket, 'Invalid scene choice or game not started.');
+          return;
+        }
+        if (result.flagsUpdated) {
+          broadcastScenes();
+        } else {
+          broadcastSceneForPlayer(playerId);
+        }
+        broadcastState();
+        return;
+      }
       default:
         sendError(socket, 'Unknown message type');
     }
   });
 
   socket.on('close', () => {
-    if (joined) {
-      game.removePlayer(playerId);
-      broadcastState();
-    }
+    if (!boundPlayerId) return;
+    game.disconnectPlayer(boundPlayerId);
+    joined = false;
+    boundPlayerId = null;
+    broadcastState();
   });
 });
 

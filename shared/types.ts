@@ -12,6 +12,7 @@ export interface Player {
   hp: number;
   connectedAt: string;
   order: number;
+  connected: boolean;
 }
 
 export interface SceneOption {
@@ -118,6 +119,15 @@ export interface PlayerSceneState {
   rollState: RollState | null;
 }
 
+export interface ScenePayload {
+  playerId: string;
+  sceneId: string | null;
+  text: string;
+  options: SceneOption[];
+  diceRollRequired: boolean;
+  rollState: RollState | null;
+}
+
 export interface GameMap {
   width: number;
   height: number;
@@ -164,6 +174,7 @@ export interface ClientJoinMessage {
   type: 'join';
   payload: {
     displayName: string;
+    playerId?: string;
   };
 }
 
@@ -249,13 +260,7 @@ export interface ServerScriptMessage {
 
 export interface ServerSceneMessage {
   type: 'sceneUpdate';
-  payload: {
-    playerId: string;
-    sceneId: string | null;
-    text: string;
-    options: SceneOption[];
-    diceRollRequired: boolean;
-  };
+  payload: ScenePayload;
 }
 
 export interface ServerErrorMessage {

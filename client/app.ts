@@ -8,6 +8,8 @@ import type {
   ServerIdMessage,
   SceneOption,
   GameState,
+  ScenePayload,
+  ClientJoinMessage,
 } from '../shared/types';
 
 type View = 'intro' | 'dice' | 'feed';
@@ -17,13 +19,8 @@ interface Character {
   role: string;
 }
 
-interface ScenePayload {
-  playerId: string;
-  sceneId: string | null;
-  text: string;
-  options: SceneOption[];
-  diceRollRequired: boolean;
-}
+const STORAGE_PLAYER_ID = 'dice-ritual-player-id';
+const STORAGE_DISPLAY_NAME = 'dice-ritual-display-name';
 
 const root = document.getElementById('app');
 
@@ -124,6 +121,7 @@ const statusLine = document.getElementById('statusLine') as HTMLElement;
 const turnLine = document.getElementById('turnLine') as HTMLElement;
 const beginMasterBtn = document.getElementById('beginMasterBtn') as HTMLButtonElement;
 const masterControls = document.querySelector('.master-controls') as HTMLElement;
+const masterPanel = document.getElementById('masterPanel') as HTMLElement;
 const masterStatus = document.getElementById('masterStatus') as HTMLElement;
 const startGameBtn = document.getElementById('startGameBtn') as HTMLButtonElement;
 const scriptUploadSection = document.getElementById('scriptUploadSection') as HTMLElement;
@@ -318,6 +316,7 @@ const updateScriptUI = (state: GameState) => {
   scriptUploadSection.classList.toggle('hidden', !showUploader);
   scriptFileInput.disabled = !showUploader;
   uploadScriptBtn.disabled = !showUploader;
+  scriptStatusLine.classList.toggle('hidden', state.gameStarted);
 };
 
 const getLocalSceneState = (state: GameState) => {
@@ -351,13 +350,14 @@ const updateSceneFromState = (state: GameState) => {
     rollBtn.hidden = true;
     return;
   }
-  updateSceneDisplay({
-    playerId: localId ?? '',
-    sceneId: sceneState.sceneId,
-    text: sceneState.sceneText || 'Waiting for the story to unfold.',
-    options: sceneState.availableOptions,
-    diceRollRequired: sceneState.diceRollRequired,
-  });
+      updateSceneDisplay({
+        playerId: localId ?? '',
+        sceneId: sceneState.sceneId,
+        text: sceneState.sceneText || 'Waiting for the story to unfold.',
+        options: sceneState.availableOptions,
+        diceRollRequired: sceneState.diceRollRequired,
+        rollState: sceneState.rollState,
+      });
 };
 
 const sendChooseOption = (index: number) => {
@@ -403,6 +403,7 @@ const updateLobbyStatus = (state: GameState) => {
 const updateMasterControls = (state: GameState) => {
   const isMaster = state.masterId === localId;
   masterControls.classList.toggle('hidden', state.gameStarted);
+  masterPanel.classList.toggle('hidden', !isMaster || state.gameStarted);
   beginMasterBtn.disabled = !connected || (state.masterId !== null && !isMaster) || state.gameStarted;
   if (isMaster && !state.gameStarted) {
     if (!state.scriptLoaded) {
@@ -457,7 +458,17 @@ const connect = (name: string) => {
   ws.addEventListener('open', () => {
     connected = true;
     statusLine.textContent = 'Connected. Waiting for a GM to claim the seat.';
-    ws?.send(JSON.stringify({ type: 'join', payload: { displayName: name } }));
+    const storedId = localStorage.getItem(STORAGE_PLAYER_ID);
+    const joinPayload: ClientJoinMessage = {
+      type: 'join',
+      payload: {
+        displayName: name,
+      },
+    };
+    if (storedId) {
+      joinPayload.payload.playerId = storedId;
+    }
+    ws?.send(JSON.stringify(joinPayload));
     showView('dice');
   });
 
@@ -468,6 +479,7 @@ const connect = (name: string) => {
       case 'id': {
         const idMessage = message as ServerIdMessage;
         localId = idMessage.payload.playerId;
+        localStorage.setItem(STORAGE_PLAYER_ID, localId);
         break;
       }
       case 'state': {
@@ -515,6 +527,7 @@ joinForm.addEventListener('submit', (event) => {
     return;
   }
 
+  localStorage.setItem(STORAGE_DISPLAY_NAME, name);
   character = { name, role };
   characterSummary.textContent = `You are ${name}, the ${role}.`;
   statusLine.textContent = 'Connecting...';
